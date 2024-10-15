@@ -40,18 +40,31 @@ int main(int argc, char **argv) {
         switch (option_index) {
           case 0:
             seed = atoi(optarg);
-            // your code here
+            // my code
             // error handling
+            if (seed <= 0) 
+            {
+              printf("seed is a positive number\n");
+              return 1;
+            }
             break;
           case 1:
             array_size = atoi(optarg);
-            // your code here
+            // my code
             // error handling
+            if (array_size <= 0) {
+              printf("array_size is a positive number\n");
+              return 1;
+            }
             break;
           case 2:
             pnum = atoi(optarg);
-            // your code here
+            // my code
             // error handling
+            if (pnum <= 0) {
+              printf("pnum is a positive number\n");
+              return 1;
+            }
             break;
           case 3:
             with_files = true;
@@ -91,22 +104,57 @@ int main(int argc, char **argv) {
   struct timeval start_time;
   gettimeofday(&start_time, NULL);
 
-  for (int i = 0; i < pnum; i++) {
-    pid_t child_pid = fork();
-    if (child_pid >= 0) {
-      // successful fork
-      active_child_processes += 1;
-      if (child_pid == 0) {
-        // child process
+  //my code
+  int (*pipe_fd)[2]; //дескрипторы "труб"
+  if (!with_files) //если флаг by_files не был установлен
+    pipe_fd = malloc(pnum * sizeof(int[2])); //генерируем pnum "труб"
+  
+  pid_t child_pid;
 
-        // parallel somehow
+  if (with_files) //если флаг by_files был установлен
+    fclose(fopen(".shared_data.txt", "w")); //отчищаем содержимое файла и создаем файл
+
+  for (int i = 0; i < pnum; i++) {
+
+    //my code
+    if(!with_files && pipe(pipe_fd[i])==-1){ //проверка на успешную инициализацию "труб"
+    //с последующей инициализацией
+    perror("pipe");
+    exit(EXIT_FAILURE);
+    }
+
+    child_pid = fork(); //разделяем процессы, копируя переменные (память, выделенная malloc, не выделяется повторно)
+    if (child_pid >= 0) {
+      //my code
+      // successful fork
+      struct MinMax forked_minmax; //создаем временную переменную
+      
+      active_child_processes += 1;
+      if (child_pid == 0) { //если процесс дочерний
+        //my code
+        // child process
+        // разделяем нагрузку между дочерними процессами
+        unsigned begin_ = i*(array_size/pnum);
+        unsigned end_ = begin_+array_size/pnum;
+        if((i+1)>=pnum)
+          end_ = array_size;
+        forked_minmax = GetMinMax(array, begin_, end_); //находим локальный min/max
 
         if (with_files) {
+          //my code
           // use files here
+          FILE *fd = fopen(".shared_data.txt", "a+");
+          fprintf(fd, "%d %d\n", forked_minmax.min, forked_minmax.max);
+          fclose(fd);
+
         } else {
+          //my code
           // use pipe here
+          close(pipe_fd[i][0]); //закрываем сторону "трубы" на чтение
+          write(pipe_fd[i][1], &forked_minmax, sizeof(forked_minmax)); //записываем (заливаем) в "трубы" переменную forked_minmax
+          close(pipe_fd[i][1]); //закрываем сторону "трубы" на запись
         }
-        return 0;
+        _exit(EXIT_SUCCESS);
       }
 
     } else {
@@ -116,28 +164,51 @@ int main(int argc, char **argv) {
   }
 
   while (active_child_processes > 0) {
-    // your code here
-
     active_child_processes -= 1;
+    //my code
+    wait(NULL);
   }
 
   struct MinMax min_max;
   min_max.min = INT_MAX;
   min_max.max = INT_MIN;
 
+  //my code
+  FILE *fd;
+  if(with_files) //если флаг by_files установлен
+    fd = fopen(".shared_data.txt", "r");
+
   for (int i = 0; i < pnum; i++) {
     int min = INT_MAX;
     int max = INT_MIN;
 
     if (with_files) {
+      //my code
       // read from files
+      fscanf(fd, "%d %d\n", &min, &max); //читаем содержимое файла
+
     } else {
+      //my code
       // read from pipes
+      struct MinMax piped_minmax;
+      //читаем с "трубы" (в родительском процессе все "трубы" доступны для чтения и записи)
+      if(read(pipe_fd[i][0], &piped_minmax, sizeof(piped_minmax))==-1) //если не удалось прочитать
+        printf("bad pipe\n");
+
+      //закупориваем трубы
+      close(pipe_fd[i][0]);
+      close(pipe_fd[i][1]);
+      min = piped_minmax.min;
+      max = piped_minmax.max;
     }
 
     if (min < min_max.min) min_max.min = min;
     if (max > min_max.max) min_max.max = max;
   }
+
+  //my code
+  if(with_files) //закрываем файл .shared_data.txt
+    fclose(fd);
 
   struct timeval finish_time;
   gettimeofday(&finish_time, NULL);
